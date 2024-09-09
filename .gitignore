@@ -1,0 +1,13 @@
+# dependencies
+/node_modules
+
+# environment variables
+.env
+
+# build output
+/dist
+
+# IDE specific
+.vscode
+
+LMS-BACK.rar
