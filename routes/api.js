@@ -27,7 +27,26 @@ const getNextSequence = async (name) => {
   return next.seq;
 }
 
-module.exports = (io) => {
+const areObjectsEqual = (obj1, obj2) => {
+  return obj1.notificationType === obj2.notificationType &&
+         obj1.frequencyValue === obj2.frequencyValue &&
+         obj1.frequencyUnit === obj2.frequencyUnit;  // Add more fields as necessary
+}
+
+const areRemindersEqual = (arr1, arr2) => {
+  if (arr1.length !== arr2.length) return false;
+
+  for (let i = 0; i < arr1.length; i++) {
+    if (!areObjectsEqual(arr1[i], arr2[i])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// module.exports = (io) => {
+module.exports = () => {
   const router = express.Router();
 
   router.get('/leads-count/:uid', async (req, res) => {
@@ -350,9 +369,9 @@ module.exports = (io) => {
       }
 
       const result = await tCollection.insertOne(taskDetails);
-      const newTask = await tCollection.findOne({ _id: result.insertedId });
-      io.to(taskDetails.UID).emit('taskNotification', newTask);
-      
+      // const newTask = await tCollection.findOne({ _id: result.insertedId });
+      // io.to(taskDetails.UID).emit('taskNotification', newTask);
+
       // If there are reminders, schedule them
       if (data.reminder && data.reminder.length > 0) {
         scheduleTaskReminders(taskDetails, istCurrentDate);
@@ -380,7 +399,6 @@ module.exports = (io) => {
     try {
       const TID = req.params.TID;
       const data = req.body;
-
       const task = await tCollection.findOne({ TID });
 
       if (!task) {
@@ -395,7 +413,9 @@ module.exports = (io) => {
         editedOn: todayDate,
       };
 
+      const istDate = new Date(data.taskDate);
       let currentTaskDate;
+
       if (data.taskDate) {
         const istDate = new Date(data.taskDate);
         currentTaskDate = new Date(istDate.getTime() - (istDate.getTimezoneOffset() * 60000));
@@ -413,8 +433,7 @@ module.exports = (io) => {
         editHistory.previousUID = task.UID;
       }
 
-      // If no fields have changed, don't update
-      if (Object.keys(editHistory).length === 2) {
+      if (Object.keys(editHistory).length === 2 && (data.reminders.length == 0 || areRemindersEqual(data.reminders, task.reminder))) {
         return res.status(400).send('No changes detected.');
       }
 
@@ -425,12 +444,31 @@ module.exports = (io) => {
             ...(data.taskDate && { taskDate: currentTaskDate }),
             ...(data.UID && { UID: data.UID }),
             ...(data.taskStatus && { taskStatus: data.taskStatus }),
+            ...(Array.isArray(data.reminders) && { reminder: data.reminders })
           },
           $push: {
             edits: editHistory
           }
         }
       );
+
+      const taskDetails = {
+        TID,
+        title: task.title,
+        description: task.description,
+        UID: data.UID,
+        taskStatus: data.taskStatus,
+        reminder: data.reminders,
+      };
+
+      if (task.LID && task.PID) {
+        taskDetails.LID = task.LID;
+        taskDetails.PID = task.PID;
+      }
+
+      if (data.reminders && data.reminders.length > 0) {
+        scheduleTaskReminders(taskDetails, istDate);
+      }
 
       res.status(200).send('Task updated successfully.');
     } catch (err) {
