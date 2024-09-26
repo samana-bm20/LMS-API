@@ -29,8 +29,8 @@ const getNextSequence = async (name) => {
 
 const areObjectsEqual = (obj1, obj2) => {
   return obj1.notificationType === obj2.notificationType &&
-         obj1.frequencyValue === obj2.frequencyValue &&
-         obj1.frequencyUnit === obj2.frequencyUnit;  // Add more fields as necessary
+    obj1.frequencyValue === obj2.frequencyValue &&
+    obj1.frequencyUnit === obj2.frequencyUnit;  // Add more fields as necessary
 }
 
 const areRemindersEqual = (arr1, arr2) => {
@@ -140,6 +140,123 @@ module.exports = () => {
     }
   });
 
+  router.post('/addUser', async (req, res) => {
+    try {
+      const data = req.body;
+
+      const existingUser = await uCollection.findOne({
+        $or: [
+          { uName: data.uName },
+          { username: data.username },
+          { password: data.password },
+          { email: data.email },
+          { mobile: data.mobile }
+        ]
+      });
+
+      if (existingUser) {
+        return res.status(400).send('Some or all of user details already exist');
+      }
+
+      const nextUID = await getNextSequence("UID");
+
+      const userDetails = {
+        UID: "U" + nextUID,
+        uName: data.uName,
+        username: data.username,
+        password: data.password,
+        email: data.email,
+        mobile: data.mobile,
+        userType: Number(data.userType),
+        uStatus: data.uStatus
+      };
+
+      await uCollection.insertOne(userDetails);
+
+      res.status(200).send('User added successfully');
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Server Error');
+    }
+  });
+
+  router.put('/editUser/:UID', async (req, res) => {
+    try {
+      const UID = req.params.UID;
+      const data = req.body;
+      const user = await uCollection.findOne({ UID });
+
+      if (!user) {
+        return res.status(404).send('User not found.');
+      }
+
+      const updatedFields = {};
+
+      if (data.uName !== user.uName) {
+        updatedFields.uName = data.uName;
+      }
+
+      if (data.username !== user.username) {
+        updatedFields.username = data.username;
+      }
+
+      if (data.password !== user.password) {
+        updatedFields.password = data.password;
+      }
+
+      if (data.email !== user.email) {
+        updatedFields.email = data.email;
+      }
+
+      if (data.mobile !== user.mobile) {
+        updatedFields.mobile = data.mobile;
+      }
+
+      if (Number(data.userType) !== user.userType) {
+        updatedFields.userType = Number(data.userType);
+      }
+
+      if (data.uStatus !== user.uStatus) {
+        updatedFields.uStatus = data.uStatus;
+      }
+
+      if (Object.keys(updatedFields).length === 0) {
+        return res.status(400).send('No changes detected.');
+      }
+
+      const existingUser = await uCollection.findOne({
+        $and: [
+          { UID: { $ne: UID } },
+          {
+            $or: [
+              { uName: data.uName },
+              { username: data.username },
+              { password: data.password },
+              { email: data.email },
+              { mobile: data.mobile }
+            ]
+          }
+        ]
+      });
+
+      if (existingUser) {
+        return res.status(400).send('Duplicate details cannot be inserted');
+      }
+
+      await uCollection.updateOne(
+        { UID },
+        {
+          $set: updatedFields
+        }
+      );
+
+      res.status(200).send('User updated successfully');
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Server Error');
+    }
+  });
+
   router.get('/leadDetails', async (req, res) => {
     try {
       const lead = await collection.aggregate([{ $project: { _id: 0 } }]).toArray();
@@ -237,6 +354,83 @@ module.exports = () => {
     }
   });
 
+  router.put('/editLead/:LID', async (req, res) => {
+    try {
+      const LID = Number(req.params.LID);
+      const data = req.body;
+      const lead = await collection.findOne({ LID });
+
+      if (!lead) {
+        return res.status(404).send('Lead not found.');
+      }
+
+      const conditions = [
+        ...(data.contact?.mobileNo ? [{ "contact.mobileNo": data.contact.mobileNo }] : []),
+        ...(data.contact?.emailID ? [{ "contact.emailID": data.contact.emailID }] : []),
+        ...(data.name ? [{ name: data.name }] : []),
+        ...(data.organizationName ? [{ organizationName: data.organizationName }] : [])
+      ];
+
+      if (conditions.length > 0) {
+        const duplicateLead = await collection.findOne({
+          LID: { $ne: LID }, // Exclude the current lead
+          $or: conditions
+        });
+
+        if (duplicateLead) {
+          return res.status(400).send('Duplicate details found.');
+        }
+      }
+
+      const updatedFields = {};
+
+      if (data.name && data.name !== lead.name) {
+        updatedFields.name = data.name;
+      }
+
+      if (data.organizationName && data.organizationName !== lead.organizationName) {
+        updatedFields.organizationName = data.organizationName;
+      }
+
+      if (data.contact) {
+        const contactUpdate = {};
+        if (data.contact.mobileNo !== lead.contact?.mobileNo) {
+          contactUpdate.mobileNo = data.contact.mobileNo;
+        }
+        if (data.contact.emailID !== lead.contact?.emailID) {
+          contactUpdate.emailID = data.contact.emailID;
+        }
+        if (Object.keys(contactUpdate).length > 0) {
+          updatedFields.contact = contactUpdate;
+        }
+      }
+
+      if (data.designationDept !== lead.designationDept) {
+        updatedFields.designationDept = data.designationDept;
+      }
+
+      if (data.address !== lead.address) {
+        updatedFields.address = data.address;
+      }
+
+      if (Object.keys(updatedFields).length === 0) {
+        return res.status(400).send('No changes detected.');
+      }
+
+      await collection.updateOne(
+        { LID },
+        {
+          $set: updatedFields
+        }
+      );
+
+      res.status(200).send('Lead updated successfully');
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Server Error');
+    }
+  });
+
   router.post('/addProduct', async (req, res) => {
     try {
       const data = req.body;
@@ -264,6 +458,80 @@ module.exports = () => {
       await lpCollection.insertOne(productDetails);
 
       res.status(200).send('Product added successfully');
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Server Error');
+    }
+  });
+
+  router.post('/addNewProduct', async (req, res) => {
+    try {
+      const data = req.body;
+
+      const existingProduct = await pCollection.findOne({ pName: data.pName });
+      if (existingProduct) {
+        return res.status(400).send('This product already exists.');
+      }
+
+      const nextPID = await getNextSequence("PID");
+
+      const productDetails = {
+        PID: "P" + nextPID,
+        pName: data.pName,
+        tagline: data.tagline,
+        owner: data.owner,
+        pDescription: data.pDescription
+      };
+
+      await pCollection.insertOne(productDetails);
+
+      res.status(200).send('Product added successfully');
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Server Error');
+    }
+  });
+
+  router.put('/editProduct/:PID', async (req, res) => {
+    try {
+      const PID = req.params.PID;
+      const data = req.body;
+      const product = await pCollection.findOne({ PID });
+
+      if (!product) {
+        return res.status(404).send('Product not found.');
+      }
+
+      const updatedFields = {};
+
+      if (data.pName !== product.pName) {
+        updatedFields.pName = data.pName;
+      }
+
+      if (data.tagline !== product.tagline) {
+        updatedFields.tagline = data.tagline;
+      }
+
+      if (data.owner !== product.owner) {
+        updatedFields.owner = data.owner;
+      }
+
+      if (data.pDescription !== product.pDescription) {
+        updatedFields.pDescription = data.pDescription;
+      }
+
+      if (Object.keys(updatedFields).length === 0) {
+        return res.status(400).send('No changes detected.');
+      }
+
+      await pCollection.updateOne(
+        { PID },
+        {
+          $set: updatedFields
+        }
+      );
+
+      res.status(200).send('Product updated successfully');
     } catch (err) {
       console.error(err);
       res.status(500).send('Server Error');
@@ -470,7 +738,7 @@ module.exports = () => {
         scheduleTaskReminders(taskDetails, istDate);
       }
 
-      res.status(200).send('Task updated successfully.');
+      res.status(200).send('Task updated successfully');
     } catch (err) {
       console.error(err);
       res.status(500).send('Server Error');
@@ -533,7 +801,7 @@ module.exports = () => {
         }
       );
 
-      res.status(200).send('Follow-up updated successfully.');
+      res.status(200).send('Follow-up updated successfully');
     } catch (err) {
       console.error(err);
       res.status(500).send('Server Error');
