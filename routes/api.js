@@ -11,6 +11,35 @@ const fetchTasksPipeline = require('../pipelines/fetchTasksPipeline');
 const { upload, importLead } = require('../pipelines/insertImportLead');
 const { scheduleTaskReminders } = require('../pipelines/triggeredEmailFunction');
 
+const multer = require("multer");
+const mongoose = require('mongoose');
+const Grid = require('gridfs-stream');
+const { GridFsStorage } = require("multer-gridfs-storage");
+const mongoURI = process.env.DATABASE_URL;
+// Initialize gfs
+const conn = mongoose.createConnection(mongoURI);
+let gfs;
+conn.once('open', () => {
+  gfs = Grid(conn.db, mongoose.mongo);
+  gfs.collection('uploads');
+});
+const storage = new GridFsStorage({
+  url: mongoURI,
+  file: (req, file) => {
+    const sno = req.body;
+    return {
+      filename: file.originalname,
+      bucketName: "uploads",
+      metadata: {
+        F_ID: sno,
+        uploadedBy: req.body.uploadedBy || 'Unknown',
+      },
+      contentType: file.mimetype,
+    };
+  },
+});
+const uploadMulter = multer({ storage });
+
 //LeadsMaster apis
 const collection = client.db().collection('Leads');
 const sCollection = client.db().collection('Status');
@@ -19,6 +48,7 @@ const uCollection = client.db().collection('Users');
 const lpCollection = client.db().collection('LeadProducts');
 const fCollection = client.db().collection('FollowUp');
 const tCollection = client.db().collection('Tasks');
+const ESRIProductCollection = client.db().collection("VendorESRIClientProduct");
 
 const getNextSequence = async (name) => {
   const next = await client.db().collection('Counter').findOneAndUpdate(
@@ -51,13 +81,22 @@ const encryptData = (data) => {
   return CryptoJS.AES.encrypt(JSON.stringify(data), ENCRYPTION_KEY).toString();
 }
 
+const decryptData = (data) => {
+  const bytes = CryptoJS.AES.decrypt(data, ENCRYPTION_KEY);
+  return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
+}
+
 // module.exports = (io) => {
 module.exports = () => {
   const router = express.Router();
+  router.get("/", async (req, res) => {
+    return res.status(200).json({ msg: `API starts running` });
+  });
 
-  router.get('/leads-count/:uid', async (req, res) => {
+  router.get('/leads-count', async (req, res) => res.sendStatus(405));
+  router.post('/leads-count', async (req, res) => {
     try {
-      const uid = req.params.uid;
+      const uid = req.body.uid;
 
       const user = await uCollection.findOne({ UID: uid });
       if (!user) {
@@ -75,9 +114,10 @@ module.exports = () => {
     }
   });
 
-  router.get('/productlead-count/:uid', async (req, res) => {
+  router.get('/productlead-count', async (req, res) => res.sendStatus(405));
+  router.post('/productlead-count', async (req, res) => {
     try {
-      const uid = req.params.uid;
+      const uid = req.body.uid;
 
       const user = await uCollection.findOne({ UID: uid });
       if (!user) {
@@ -95,10 +135,10 @@ module.exports = () => {
     }
   });
 
-  router.get('/leadData/:uid/:pid', async (req, res) => {
+  router.get('/leadData', async (req, res) => res.sendStatus(405));
+  router.post('/leadData', async (req, res) => {
     try {
-      const pid = req.params.pid;
-      const uid = req.params.uid;
+      const { uid, pid } = req.body;
 
       const user = await uCollection.findOne({ UID: uid });
       if (!user) {
@@ -117,7 +157,8 @@ module.exports = () => {
     }
   });
 
-  router.get('/status', async (req, res) => {
+  router.get('/status', async (req, res) => res.sendStatus(405));
+  router.post('/status', async (req, res) => {
     try {
       const data = await sCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -127,7 +168,8 @@ module.exports = () => {
     }
   });
 
-  router.get('/products', async (req, res) => {
+  router.get('/products', async (req, res) => res.sendStatus(405));
+  router.post('/products', async (req, res) => {
     try {
       const data = await pCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -137,7 +179,8 @@ module.exports = () => {
     }
   });
 
-  router.get('/users', async (req, res) => {
+  router.get('/users', async (req, res) => res.sendStatus(405));
+  router.post('/users', async (req, res) => {
     try {
       const data = await uCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -264,7 +307,8 @@ module.exports = () => {
     }
   });
 
-  router.get('/leadDetails', async (req, res) => {
+  router.get('/leadDetails', async (req, res) => res.sendStatus(405));
+  router.post('/leadDetails', async (req, res) => {
     try {
       const data = await collection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -274,7 +318,8 @@ module.exports = () => {
     }
   });
 
-  router.get('/productDetails', async (req, res) => {
+  router.get('/productDetails', async (req, res) => res.sendStatus(405));
+  router.post('/productDetails', async (req, res) => {
     try {
       const data = await lpCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -284,7 +329,8 @@ module.exports = () => {
     }
   });
 
-  router.get('/followUpDetails', async (req, res) => {
+  router.get('/followUpDetails', async (req, res) => res.sendStatus(405));
+  router.post('/followUpDetails', async (req, res) => {
     try {
       const data = await fCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -608,7 +654,8 @@ module.exports = () => {
     }
   });
 
-  router.get('/tasks', async (req, res) => {
+  router.get('/tasks', async (req, res) => res.sendStatus(405));
+  router.post('/tasks', async (req, res) => {
     try {
       const pipeline = fetchTasksPipeline;
       const data = await tCollection.aggregate(pipeline).toArray();
@@ -618,7 +665,7 @@ module.exports = () => {
       res.status(500).send('Server Error');
     }
   });
-  
+
   router.post('/addTask', async (req, res) => {
     try {
       const data = req.body;
@@ -816,6 +863,115 @@ module.exports = () => {
   });
 
   router.post('/importLead', upload.single('file'), importLead);
+
+  router.get('/getESRIProduct', async (req, res) => res.sendStatus(405));
+  router.post("/getESRIProduct", async (req, res) => {
+    try {
+      const data = await ESRIProductCollection.find({
+        SNO: { $ne: 0 },
+      }).toArray();
+      res.status(200).json(encryptData(data));
+    } catch (err) {
+      console.error(err);
+      res.status(500).send("Server Error");
+    }
+  });
+
+  router.get('/getLastIndexESRIProduct', async (req, res) => res.sendStatus(405));
+  router.post("/getLastIndexESRIProduct", async (req, res) => {
+    try {
+      const data = await ESRIProductCollection.find()
+        .sort({ SNO: -1 })
+        .limit(1)
+        .toArray();
+      res.status(200).json(encryptData(data[0].SNO));
+    } catch (err) {
+      console.error(err);
+      res.status(500).send("Server Error");
+    }
+  });
+
+  router.post("/insertESRIProduct", async (req, res) => {
+    const data = req.body;
+    try {
+      await ESRIProductCollection.insertOne(data);
+      res.status(200).json({ msg: "Record insert successfully!" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).send("Server Error");
+    }
+  });
+
+  router.post("/updateESRIProduct", async (req, res) => {
+
+    const data = decryptData(req.body.data);
+    const sno = req.body.SNO;
+    const filter = { SNO: sno }
+
+    const update = {
+      $set: {
+        ClientName: data.ClientName,
+        ClientAddress: data.ClientAddress,
+        City: data.City,
+        State: data.State,
+        Pincode: parseInt(data.Pincode),
+        Contact: data.Contact,
+        Phone: data.Phone,
+        Email: data.Email,
+        PONumber: data.PONumber,
+        PODate: data.PODate,
+        POValue: data.POValue,
+        Product: data.Product,
+        ProductVersion: parseFloat(data.ProductVersion),
+        Description: data.Description,
+        NumberOfLicenses: parseInt(data.NumberOfLicenses),
+        LicenseDate: data.LicenseDate,
+        Tenure: data.Tenure,
+        RenewalDueDate: data.RenewalDueDate
+      },
+    };
+    try {
+      const result = await ESRIProductCollection.updateOne(filter, update);
+      res.status(200).json({ count: result.modifiedCount, msg: "Record insert successfully!" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).send("Server Error");
+    }
+  });
+
+  router.post("/uploadDoc", uploadMulter.single("file"), (req, res) => {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).send("No file uploaded");
+    }
+    if (!file.id) {
+      return res.status(500).send("Failed to get file ID from GridFS");
+    }
+    res.status(200).json({
+      message: "File uploaded to GridFS successfully",
+      fileId: file.id,
+    });
+  });
+
+  router.get('/download', async (req, res) => res.sendStatus(405));
+  router.post('/download', (req, res) => {
+    const fid = req.query.fid;
+    console.log(gfs.files)
+    gfs.files.findOne({ 'metadata.F_ID.SNO': "67" }, (err, file) => {
+      if (err || !file) {
+        return res.status(404).send('File not found');
+      }
+
+      const readStream = gfs.createReadStream(file._id);
+      res.setHeader('Content-Type', file.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename=${file.filename}`);
+
+      readStream.pipe(res).on('error', (error) => {
+        console.error('Error reading file:', error);
+        res.status(500).send('Error reading file');
+      });
+    });
+  });
 
 
   return router;
