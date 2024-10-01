@@ -1,5 +1,7 @@
 const express = require('express');
 const { client } = require('../config/database');
+const CryptoJS = require('crypto-js');
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
 
 //import pipelines
 const leadPIDPipeline = require('../pipelines/leadPIDPipeline');
@@ -45,6 +47,10 @@ const areRemindersEqual = (arr1, arr2) => {
   return true;
 }
 
+const encryptData = (data) => {
+  return CryptoJS.AES.encrypt(JSON.stringify(data), ENCRYPTION_KEY).toString();
+}
+
 // module.exports = (io) => {
 module.exports = () => {
   const router = express.Router();
@@ -61,8 +67,8 @@ module.exports = () => {
       const userType = user.userType;
       const pipeline = leadCountPipline(userType, uid);
 
-      const result = await lpCollection.aggregate(pipeline).toArray();
-      res.json(result);
+      const data = await lpCollection.aggregate(pipeline).toArray();
+      res.json(encryptData(data));
     } catch (err) {
       console.error('Error fetching lead counts', err);
       res.status(500).json({ error: err.message });
@@ -81,8 +87,8 @@ module.exports = () => {
       const userType = user.userType;
       const pipeline = productLeadCountPipeline(userType, uid);
 
-      const result = await lpCollection.aggregate(pipeline).toArray();
-      res.json(result);
+      const data = await lpCollection.aggregate(pipeline).toArray();
+      res.json(encryptData(data));
     } catch (err) {
       console.error('Error fetching leads status:', err);
       res.status(500).json({ error: err.message });
@@ -102,8 +108,9 @@ module.exports = () => {
       const userType = user.userType;
       const pipeline = leadPIDPipeline(userType, uid, pid);
 
-      const leads = await lpCollection.aggregate(pipeline).toArray();
-      res.json(leads);
+      const data = await lpCollection.aggregate(pipeline).toArray();
+      res.json(encryptData(data));
+
     } catch (err) {
       console.error(err);
       res.status(500).send('Server Error');
@@ -112,8 +119,8 @@ module.exports = () => {
 
   router.get('/status', async (req, res) => {
     try {
-      const status = await sCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
-      res.json(status);
+      const data = await sCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
+      res.json(encryptData(data));
     } catch (error) {
       console.error(error)
       res.status(500).send('Server Error');
@@ -122,8 +129,8 @@ module.exports = () => {
 
   router.get('/products', async (req, res) => {
     try {
-      const products = await pCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
-      res.json(products);
+      const data = await pCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
+      res.json(encryptData(data));
     } catch (error) {
       console.error(error)
       res.status(500).send('Server Error');
@@ -132,8 +139,8 @@ module.exports = () => {
 
   router.get('/users', async (req, res) => {
     try {
-      const users = await uCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
-      res.json(users);
+      const data = await uCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
+      res.json(encryptData(data));
     } catch (error) {
       console.error(error)
       res.status(500).send('Server Error');
@@ -259,8 +266,8 @@ module.exports = () => {
 
   router.get('/leadDetails', async (req, res) => {
     try {
-      const lead = await collection.aggregate([{ $project: { _id: 0 } }]).toArray();
-      res.json(lead);
+      const data = await collection.aggregate([{ $project: { _id: 0 } }]).toArray();
+      res.json(encryptData(data));
     } catch (error) {
       console.error(error)
       res.status(500).send('Server Error');
@@ -269,8 +276,8 @@ module.exports = () => {
 
   router.get('/productDetails', async (req, res) => {
     try {
-      const leadProduct = await lpCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
-      res.json(leadProduct);
+      const data = await lpCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
+      res.json(encryptData(data));
     } catch (error) {
       console.error(error)
       res.status(500).send('Server Error');
@@ -279,8 +286,8 @@ module.exports = () => {
 
   router.get('/followUpDetails', async (req, res) => {
     try {
-      const followUp = await fCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
-      res.json(followUp);
+      const data = await fCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
+      res.json(encryptData(data));
     } catch (error) {
       console.error(error)
       res.status(500).send('Server Error');
@@ -601,6 +608,17 @@ module.exports = () => {
     }
   });
 
+  router.get('/tasks', async (req, res) => {
+    try {
+      const pipeline = fetchTasksPipeline;
+      const data = await tCollection.aggregate(pipeline).toArray();
+      res.json(encryptData(data));
+    } catch (error) {
+      console.error(error)
+      res.status(500).send('Server Error');
+    }
+  });
+  
   router.post('/addTask', async (req, res) => {
     try {
       const data = req.body;
@@ -648,17 +666,6 @@ module.exports = () => {
       res.status(200).send('Task added successfully');
     } catch (err) {
       console.error(err);
-      res.status(500).send('Server Error');
-    }
-  });
-
-  router.get('/tasks', async (req, res) => {
-    try {
-      const pipeline = fetchTasksPipeline;
-      const tasks = await tCollection.aggregate(pipeline).toArray();
-      res.json(tasks);
-    } catch (error) {
-      console.error(error)
       res.status(500).send('Server Error');
     }
   });
