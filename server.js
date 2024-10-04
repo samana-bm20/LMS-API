@@ -12,8 +12,13 @@ const app = express();
 const server = http.createServer(app); // Create HTTP server
 
 app.use(express.json());
-app.use(cors());
 app.options('*', cors());
+app.use(cors());
+app.use(cors({
+  origin: '*',
+  allowedHeaders: ['Content-Type', 'Authorization', 'Content-Disposition'], 
+  exposedHeaders: ["Content-Disposition"],
+}));
 app.use('/public', express.static(path.join(__dirname, 'public')));
 
 // Initialize Socket.IO with the HTTP server

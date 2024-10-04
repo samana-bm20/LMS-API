@@ -1,28 +1,34 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
+const verifyToken = require('./verifyToken')
 const { client } = require('../config/database');
 const CryptoJS = require('crypto-js');
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+const SECRET_KEY = process.env.SECRET_KEY;
 
 //import pipelines
 const leadPIDPipeline = require('../pipelines/leadPIDPipeline');
-const leadCountPipline = require('../pipelines/leadCountPipeline');
+const leadCountPipeline = require('../pipelines/leadCountPipeline');
 const productLeadCountPipeline = require('../pipelines/productCountPipeline');
 const fetchTasksPipeline = require('../pipelines/fetchTasksPipeline');
 const { upload, importLead } = require('../pipelines/insertImportLead');
 const { scheduleTaskReminders } = require('../pipelines/triggeredEmailFunction');
 
+const mongodb = require("mongodb");
 const multer = require("multer");
-const mongoose = require('mongoose');
-const Grid = require('gridfs-stream');
+const mongoose = require("mongoose");
+const Grid = require("gridfs-stream");
 const { GridFsStorage } = require("multer-gridfs-storage");
 const mongoURI = process.env.DATABASE_URL;
 // Initialize gfs
 const conn = mongoose.createConnection(mongoURI);
 let gfs;
-conn.once('open', () => {
+conn.once("open", () => {
   gfs = Grid(conn.db, mongoose.mongo);
-  gfs.collection('uploads');
+  gfs.collection("uploads");
 });
+const db = client.db();
+const bucket = new mongodb.GridFSBucket(db, { bucketName: "uploads" });
 const storage = new GridFsStorage({
   url: mongoURI,
   file: (req, file) => {
@@ -32,7 +38,7 @@ const storage = new GridFsStorage({
       bucketName: "uploads",
       metadata: {
         F_ID: sno,
-        uploadedBy: req.body.uploadedBy || 'Unknown',
+        uploadedBy: req.body.uploadedBy || "Unknown",
       },
       contentType: file.mimetype,
     };
@@ -93,18 +99,52 @@ module.exports = () => {
     return res.status(200).json({ msg: `API starts running` });
   });
 
-  router.get('/leads-count', async (req, res) => res.sendStatus(405));
-  router.post('/leads-count', async (req, res) => {
+  router.post('/login', async (req, res) => {
     try {
-      const uid = req.body.uid;
+      const { username, password } = req.body;
+
+      const user = await uCollection.findOne({ username: username, password: password });
+      if (!user) {
+        return res.status(404).json({ error: 'Invalid credentials' });
+      }
+
+      // Create a JWT token
+      const token = jwt.sign(
+        { uid: user.UID, userType: user.userType },
+        SECRET_KEY,
+        { expiresIn: '1h' }  // Token expiry time
+      );
+
+      // Return the JWT token to the frontend
+      res.json({
+        token,
+        user: {
+          UID: user.UID,
+          uName: user.uName,
+          userType: user.userType,
+          uStatus: user.uStatus,
+        }
+      });
+
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Server Error');
+    }
+  });
+
+  router.get('/leadsCount', async (req, res) => res.sendStatus(405));
+  router.post('/leadsCount', verifyToken, async (req, res) => {
+    try {
+      const uid = req.user.uid;
+      const userType = req.user.userType;
 
       const user = await uCollection.findOne({ UID: uid });
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      const userType = user.userType;
-      const pipeline = leadCountPipline(userType, uid);
+      // const userType = user.userType;
+      const pipeline = leadCountPipeline(userType, uid);
 
       const data = await lpCollection.aggregate(pipeline).toArray();
       res.json(encryptData(data));
@@ -114,31 +154,33 @@ module.exports = () => {
     }
   });
 
-  router.get('/productlead-count', async (req, res) => res.sendStatus(405));
-  router.post('/productlead-count', async (req, res) => {
+  router.get('/productleadCount', async (req, res) => res.sendStatus(405));
+  router.post('/productleadCount', verifyToken, async (req, res) => {
     try {
-      const uid = req.body.uid;
+      const uid = req.user.uid;
+      const userType = req.user.userType;
 
       const user = await uCollection.findOne({ UID: uid });
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      const userType = user.userType;
+      // const userType = user.userType;
       const pipeline = productLeadCountPipeline(userType, uid);
 
       const data = await lpCollection.aggregate(pipeline).toArray();
       res.json(encryptData(data));
     } catch (err) {
-      console.error('Error fetching leads status:', err);
+      console.error('Error fetching product lead counts', err);
       res.status(500).json({ error: err.message });
     }
   });
 
   router.get('/leadData', async (req, res) => res.sendStatus(405));
-  router.post('/leadData', async (req, res) => {
+  router.post('/leadData', verifyToken, async (req, res) => {
     try {
-      const { uid, pid } = req.body;
+      const uid = req.user.uid;
+      const { pid } = req.body;
 
       const user = await uCollection.findOne({ UID: uid });
       if (!user) {
@@ -158,7 +200,7 @@ module.exports = () => {
   });
 
   router.get('/status', async (req, res) => res.sendStatus(405));
-  router.post('/status', async (req, res) => {
+  router.post('/status', verifyToken, async (req, res) => {
     try {
       const data = await sCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -169,7 +211,7 @@ module.exports = () => {
   });
 
   router.get('/products', async (req, res) => res.sendStatus(405));
-  router.post('/products', async (req, res) => {
+  router.post('/products', verifyToken, async (req, res) => {
     try {
       const data = await pCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -180,7 +222,7 @@ module.exports = () => {
   });
 
   router.get('/users', async (req, res) => res.sendStatus(405));
-  router.post('/users', async (req, res) => {
+  router.post('/users', verifyToken, async (req, res) => {
     try {
       const data = await uCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -190,7 +232,7 @@ module.exports = () => {
     }
   });
 
-  router.post('/addUser', async (req, res) => {
+  router.post('/addUser', verifyToken, async (req, res) => {
     try {
       const data = req.body;
 
@@ -230,10 +272,9 @@ module.exports = () => {
     }
   });
 
-  router.put('/editUser/:UID', async (req, res) => {
+  router.put('/editUser', verifyToken, async (req, res) => {
     try {
-      const UID = req.params.UID;
-      const data = req.body;
+      const { UID, data } = req.body;
       const user = await uCollection.findOne({ UID });
 
       if (!user) {
@@ -308,7 +349,7 @@ module.exports = () => {
   });
 
   router.get('/leadDetails', async (req, res) => res.sendStatus(405));
-  router.post('/leadDetails', async (req, res) => {
+  router.post('/leadDetails', verifyToken, async (req, res) => {
     try {
       const data = await collection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -319,7 +360,7 @@ module.exports = () => {
   });
 
   router.get('/productDetails', async (req, res) => res.sendStatus(405));
-  router.post('/productDetails', async (req, res) => {
+  router.post('/productDetails', verifyToken, async (req, res) => {
     try {
       const data = await lpCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -330,7 +371,7 @@ module.exports = () => {
   });
 
   router.get('/followUpDetails', async (req, res) => res.sendStatus(405));
-  router.post('/followUpDetails', async (req, res) => {
+  router.post('/followUpDetails', verifyToken, async (req, res) => {
     try {
       const data = await fCollection.aggregate([{ $project: { _id: 0 } }]).toArray();
       res.json(encryptData(data));
@@ -340,7 +381,7 @@ module.exports = () => {
     }
   });
 
-  router.post('/addLead', async (req, res) => {
+  router.post('/addLead', verifyToken, async (req, res) => {
     try {
       const data = req.body;
 
@@ -407,10 +448,12 @@ module.exports = () => {
     }
   });
 
-  router.put('/editLead/:LID', async (req, res) => {
+  router.put('/editLead', verifyToken, async (req, res) => {
     try {
-      const LID = Number(req.params.LID);
-      const data = req.body;
+      const { lid, editLeadData } = req.body;
+      const LID = Number(lid);
+      const data = editLeadData;
+
       const lead = await collection.findOne({ LID });
 
       if (!lead) {
@@ -484,7 +527,7 @@ module.exports = () => {
     }
   });
 
-  router.post('/addProduct', async (req, res) => {
+  router.post('/addProduct', verifyToken, async (req, res) => {
     try {
       const data = req.body;
 
@@ -517,7 +560,7 @@ module.exports = () => {
     }
   });
 
-  router.post('/addNewProduct', async (req, res) => {
+  router.post('/addNewProduct', verifyToken, async (req, res) => {
     try {
       const data = req.body;
 
@@ -545,10 +588,9 @@ module.exports = () => {
     }
   });
 
-  router.put('/editProduct/:PID', async (req, res) => {
+  router.put('/editProduct', verifyToken, async (req, res) => {
     try {
-      const PID = req.params.PID;
-      const data = req.body;
+      const { PID, data } = req.body;
       const product = await pCollection.findOne({ PID });
 
       if (!product) {
@@ -591,7 +633,7 @@ module.exports = () => {
     }
   });
 
-  router.post('/addFollowUp', async (req, res) => {
+  router.post('/addFollowUp', verifyToken, async (req, res) => {
     try {
       const data = req.body;
 
@@ -655,7 +697,7 @@ module.exports = () => {
   });
 
   router.get('/tasks', async (req, res) => res.sendStatus(405));
-  router.post('/tasks', async (req, res) => {
+  router.post('/tasks', verifyToken, async (req, res) => {
     try {
       const pipeline = fetchTasksPipeline;
       const data = await tCollection.aggregate(pipeline).toArray();
@@ -666,7 +708,7 @@ module.exports = () => {
     }
   });
 
-  router.post('/addTask', async (req, res) => {
+  router.post('/addTask', verifyToken, async (req, res) => {
     try {
       const data = req.body;
 
@@ -717,10 +759,9 @@ module.exports = () => {
     }
   });
 
-  router.put('/editTask/:TID', async (req, res) => {
+  router.put('/editTask', verifyToken, async (req, res) => {
     try {
-      const TID = req.params.TID;
-      const data = req.body;
+      const { TID, data } = req.body;
       const task = await tCollection.findOne({ TID });
 
       if (!task) {
@@ -799,10 +840,9 @@ module.exports = () => {
     }
   });
 
-  router.put('/editFollowUp/:FID', async (req, res) => {
+  router.put('/editFollowUp', verifyToken, async (req, res) => {
     try {
-      const FID = req.params.FID;
-      const data = req.body;
+      const { FID, data } = req.body;
 
       const followUp = await fCollection.findOne({ FID });
 
@@ -862,10 +902,10 @@ module.exports = () => {
     }
   });
 
-  router.post('/importLead', upload.single('file'), importLead);
+  router.post('/importLead', verifyToken, upload.single('file'), importLead);
 
   router.get('/getESRIProduct', async (req, res) => res.sendStatus(405));
-  router.post("/getESRIProduct", async (req, res) => {
+  router.post("/getESRIProduct", verifyToken, async (req, res) => {
     try {
       const data = await ESRIProductCollection.find({
         SNO: { $ne: 0 },
@@ -878,7 +918,7 @@ module.exports = () => {
   });
 
   router.get('/getLastIndexESRIProduct', async (req, res) => res.sendStatus(405));
-  router.post("/getLastIndexESRIProduct", async (req, res) => {
+  router.post("/getLastIndexESRIProduct", verifyToken, async (req, res) => {
     try {
       const data = await ESRIProductCollection.find()
         .sort({ SNO: -1 })
@@ -891,7 +931,7 @@ module.exports = () => {
     }
   });
 
-  router.post("/insertESRIProduct", async (req, res) => {
+  router.post("/insertESRIProduct", verifyToken, async (req, res) => {
     const data = req.body;
     try {
       await ESRIProductCollection.insertOne(data);
@@ -902,9 +942,9 @@ module.exports = () => {
     }
   });
 
-  router.post("/updateESRIProduct", async (req, res) => {
+  router.post("/updateESRIProduct", verifyToken, async (req, res) => {
 
-    const data = decryptData(req.body.data);
+    const data = req.body.data;
     const sno = req.body.SNO;
     const filter = { SNO: sno }
 
@@ -939,7 +979,7 @@ module.exports = () => {
     }
   });
 
-  router.post("/uploadDoc", uploadMulter.single("file"), (req, res) => {
+  router.post("/uploadDoc", verifyToken, uploadMulter.single("file"), (req, res) => {
     const file = req.file;
     if (!file) {
       return res.status(400).send("No file uploaded");
@@ -954,23 +994,47 @@ module.exports = () => {
   });
 
   router.get('/download', async (req, res) => res.sendStatus(405));
-  router.post('/download', (req, res) => {
-    const fid = req.query.fid;
-    console.log(gfs.files)
-    gfs.files.findOne({ 'metadata.F_ID.SNO': "67" }, (err, file) => {
-      if (err || !file) {
-        return res.status(404).send('File not found');
-      }
-
-      const readStream = gfs.createReadStream(file._id);
-      res.setHeader('Content-Type', file.contentType);
-      res.setHeader('Content-Disposition', `attachment; filename=${file.filename}`);
-
-      readStream.pipe(res).on('error', (error) => {
-        console.error('Error reading file:', error);
-        res.status(500).send('Error reading file');
-      });
-    });
+  router.post("/download", verifyToken, async (req, res) => {
+    const fid = req.body.viewmode;
+    const fs = require("fs");
+    const path = require("path");
+    const cursor = bucket
+      .find({ "metadata.F_ID.SNO": `${fid}` })
+      .sort({ uploadDate: -1 })
+      .limit(1);
+    const files = await cursor.toArray();
+    // console.log(files.length);
+    if (files.length !== 0) {
+      const fileId = new mongodb.ObjectId(`${files[0]._id}`);
+      const downloadStream = bucket.openDownloadStream(fileId);
+      const tempFilePath = path.join(__dirname, `../${files[0].filename}`);
+      const localFileWriteStream = fs.createWriteStream(
+        `./${files[0].filename}`
+      );
+      downloadStream
+        .pipe(localFileWriteStream)
+        .on("error", function (err) {
+          console.error("Error while downloading the file:", err);
+          res.status(500).send("An error occurred while downloading the file");
+        })
+        .on("finish", function () {
+          res.download(tempFilePath, `${files[0].filename}`, (err) => {
+            if (err) {
+              res.status(500).send("Error occurred while downloading the file");
+            } else {
+              fs.unlink(tempFilePath, (err) => {
+                if (err) {
+                  console.error("Error deleting temp file:", err);
+                } else {
+                  // console.log("Temporary file deleted successfully");
+                }
+              });
+            }
+          });
+        });
+    } else {
+      res.status(404).send("Records not found!");
+    }
   });
 
 
