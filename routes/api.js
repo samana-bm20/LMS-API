@@ -419,11 +419,17 @@ module.exports = () => {
       const lead = {
         LID: parseInt(nextLID),
         name: data.name,
-        designationDept: data.designationDept,
         organizationName: data.organizationName,
         contact: data.contact,
-        address: data.address
       };
+
+      if (data.designationDept != null && data.designationDept !== '') {
+        lead.designationDept = data.designationDept;
+      }
+      
+      if (data.address != null && data.address !== '') {
+        lead.address = data.address;
+      }
 
       const istDate = new Date();
       const utcDate = new Date(istDate.getTime() - (istDate.getTimezoneOffset() * 60000));
