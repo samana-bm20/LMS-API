@@ -5,6 +5,7 @@ const { client } = require('../config/database');
 const CryptoJS = require('crypto-js');
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
 const SECRET_KEY = process.env.SECRET_KEY;
+const { ObjectId } = require('mongodb');
 
 //import pipelines
 const leadPIDPipeline = require('../pipelines/leadPIDPipeline');
@@ -19,6 +20,7 @@ const multer = require("multer");
 const mongoose = require("mongoose");
 const Grid = require("gridfs-stream");
 const { GridFsStorage } = require("multer-gridfs-storage");
+const { Socket } = require('socket.io');
 const mongoURI = process.env.DATABASE_URL;
 // Initialize gfs
 const conn = mongoose.createConnection(mongoURI);
@@ -48,6 +50,7 @@ const uploadMulter = multer({ storage });
 
 //LeadsMaster apis
 const collection = client.db().collection('Leads');
+const nCollection = client.db().collection('Notifications');
 const sCollection = client.db().collection('Status');
 const pCollection = client.db().collection('Products');
 const uCollection = client.db().collection('Users');
@@ -92,8 +95,7 @@ const decryptData = (data) => {
   return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
 }
 
-// module.exports = (io) => {
-module.exports = () => {
+module.exports = (io) => {
   const router = express.Router();
   router.get("/", async (req, res) => {
     return res.status(200).json({ msg: `API starts running` });
@@ -108,14 +110,12 @@ module.exports = () => {
         return res.status(404).json({ error: 'Invalid credentials' });
       }
 
-      // Create a JWT token
       const token = jwt.sign(
         { uid: user.UID, userType: user.userType },
         SECRET_KEY,
-        { expiresIn: '1h' }  // Token expiry time
+        { expiresIn: '1h' }
       );
 
-      // Return the JWT token to the frontend
       res.json({
         token,
         user: {
@@ -193,6 +193,33 @@ module.exports = () => {
       const data = await lpCollection.aggregate(pipeline).toArray();
       res.json(encryptData(data));
 
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Server Error');
+    }
+  });
+
+  router.get('/notifications', async (req, res) => res.sendStatus(405));
+  router.post('/notifications', verifyToken, async (req, res) => {
+    try {
+      const data = await nCollection.find({}).toArray();
+      res.json(encryptData(data));
+    } catch (error) {
+      console.error(error)
+      res.status(500).send('Server Error');
+    }
+  });
+
+  router.put('/readNotification', verifyToken, async (req, res) => {
+    const { notificationId, userId } = req.body;
+
+    try {
+      await nCollection.updateOne(
+        { _id: new ObjectId(notificationId), 'targetUsers.uid': userId },
+        { $set: { 'targetUsers.$.hasRead': true } }
+      );
+
+      res.status(200).send('Notification updated successfully');
     } catch (err) {
       console.error(err);
       res.status(500).send('Server Error');
@@ -426,7 +453,7 @@ module.exports = () => {
       if (data.designationDept != null && data.designationDept !== '') {
         lead.designationDept = data.designationDept;
       }
-      
+
       if (data.address != null && data.address !== '') {
         lead.address = data.address;
       }
@@ -586,6 +613,8 @@ module.exports = () => {
       };
 
       await pCollection.insertOne(productDetails);
+
+      // io.emit('newProduct', productDetails.PID);
 
       res.status(200).send('Product added successfully');
     } catch (err) {
