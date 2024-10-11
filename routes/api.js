@@ -75,8 +75,25 @@ const areObjectsEqual = (obj1, obj2) => {
 }
 
 const areRemindersEqual = (arr1, arr2) => {
+  // If both are null or undefined, return true
+  if (arr1 == null && arr2 == null) {
+    return true;
+  }
+  
+  // If one is null/undefined and the other is not, return false
+  if (arr1 == null || arr2 == null) {
+    return false;
+  }
+
+  // Ensure both are arrays, return false if not
+  if (!Array.isArray(arr1) || !Array.isArray(arr2)) {
+    return false;
+  }
+
+  // Compare lengths of arrays
   if (arr1.length !== arr2.length) return false;
 
+  // Compare each element in the arrays
   for (let i = 0; i < arr1.length; i++) {
     if (!areObjectsEqual(arr1[i], arr2[i])) {
       return false;
@@ -85,6 +102,7 @@ const areRemindersEqual = (arr1, arr2) => {
 
   return true;
 }
+
 
 const encryptData = (data) => {
   return CryptoJS.AES.encrypt(JSON.stringify(data), ENCRYPTION_KEY).toString();
