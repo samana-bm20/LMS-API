@@ -32,7 +32,7 @@ function sanitizeFieldNames(obj) {
         const newKey = String(key).trim().replace(/\s+/g, '_');
         let value = obj[key];
         if (typeof value === 'string') {
-            if (newKey !== 'Email_ID' && newKey !== 'Status') {
+            if (newKey !== 'Email_ID' && newKey !== 'Status*') {
                 value = capitalizeWords(value);
             }
             value = value.trim();
@@ -44,13 +44,13 @@ function sanitizeFieldNames(obj) {
 
 //#region Get IDs
 async function getIDs(leadData) {
-    const productName = (leadData['Product_Name'] || '').trim();
+    const productName = (leadData['Product_Name*'] || '').trim();
     const product = await pCollection.findOne({ pName: productName });
 
-    const statusName = (leadData['Status'] || '').trim();
+    const statusName = (leadData['Status*'] || '').trim();
     const status = await sCollection.findOne({ sName: statusName });
 
-    const userName = (leadData['Assigned_To'] || '').trim();
+    const userName = (leadData['Assigned_To*'] || '').trim();
     const user = await uCollection.findOne({ uName: userName });
 
     return {
@@ -66,9 +66,9 @@ async function createNewLead(leadData) {
 
     const leadToInsert = {
         LID: parseInt(nextLID),
-        name: leadData['Lead_Name'],
+        name: leadData['Lead_Name*'],
         designationDept: {},
-        organizationName: leadData['Organization_Name'],
+        organizationName: leadData['Organization_Name*'],
         contact: {},
         address: {},
     };
@@ -170,9 +170,9 @@ async function importLead(req, res) {
         for (let leadData of data) {
             leadData = sanitizeFieldNames(leadData);
 
-            if (!('Product_Name' in leadData) || !leadData['Product_Name'].trim() ||
-                !('Status' in leadData) || !leadData['Status'].trim() ||
-                !('Assigned_To' in leadData) || !leadData['Assigned_To'].trim()) {
+            if (!('Product_Name*' in leadData) || !leadData['Product_Name*'].trim() ||
+                !('Status*' in leadData) || !leadData['Status*'].trim() ||
+                !('Assigned_To*' in leadData) || !leadData['Assigned_To*'].trim()) {
                 return res.status(400).json({ message: 'Product details cannot be empty.' });
             }
 
@@ -188,7 +188,7 @@ async function importLead(req, res) {
             const existingLead = await collection.findOne(query);
 
             if (existingLead) {
-                if (existingLead.name !== leadData['Lead_Name'] || existingLead.organizationName !== leadData['Organization_Name']) {
+                if (existingLead.name !== leadData['Lead_Name*'] || existingLead.organizationName !== leadData['Organization_Name*']) {
                     let matchedContacts = [];
 
                     if (existingLead.contact.mobileNo === leadData['Mobile_No']) {
@@ -220,8 +220,8 @@ async function importLead(req, res) {
                 }
             } else {
                 try {
-                    if (!('Lead_Name' in leadData) || !leadData['Lead_Name'].trim() ||
-                        !('Organization_Name' in leadData) || !leadData['Organization_Name'].trim()) {
+                    if (!('Lead_Name*' in leadData) || !leadData['Lead_Name*'].trim() ||
+                        !('Organization_Name*' in leadData) || !leadData['Organization_Name*'].trim()) {
                         return res.status(400).json({ message: 'Lead name or organization name cannot be empty.' });
                     }
                     const newLID = await createNewLead(leadData);
