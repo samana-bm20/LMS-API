@@ -70,7 +70,8 @@ const productLeadCountPipeline = (userType, uid) => {
                 PID: "$productDetails.PID",
                 totalLeads: 1,
                 activeLeads: 1,
-                deadLeads: 1
+                deadLeads: 1,
+                owner: "$productDetails.owner"
             }
         }
     ];

@@ -1,19 +1,23 @@
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
-
 const { client } = require('../config/database');
 
-// Collections
+
 const uCollection = client.db().collection('Users');
 const collection = client.db().collection('Leads');
 const pCollection = client.db().collection('Products');
 
+
+let scheduledReminders = {};
+
 // Schedule task reminders
 const scheduleTaskReminders = (taskDetails, taskDate) => {
-  const { reminder, title, description, UID, LID, PID } = taskDetails;
+  const { reminder, title, description, TID, UID, LID, PID } = taskDetails;
+
+  cancelExistingReminders(TID);
 
   if (!reminder || reminder.length === 0) {
-    console.log("No reminders set for this task.");
+    // console.log("No reminders set for this task.");
     return;
   }
 
@@ -32,10 +36,26 @@ const scheduleTaskReminders = (taskDetails, taskDate) => {
       return;
     }
 
-    if (notificationTypes.includes('email')) {
-      scheduleEmailReminder(title, reminderTime, UID, description, taskDate, LID, PID);
+    if (notificationTypes.includes('Email')) {
+      const reminderJob = scheduleEmailReminder(
+        title, reminderTime, UID, description, taskDate, LID, PID
+      );
+
+      if (!scheduledReminders[TID]) {
+        scheduledReminders[TID] = [];
+      }
+      scheduledReminders[TID].push(reminderJob);
     }
   });
+};
+
+// Cancel existing reminders for a specific UID
+const cancelExistingReminders = (TID) => {
+  if (scheduledReminders[TID]) {
+    scheduledReminders[TID].forEach(job => job.stop());  
+    // console.log(`Existing reminders for TID: ${TID} cancelled.`);
+    scheduledReminders[TID] = [];  
+  }
 };
 
 // Calculate reminder time based on task date and frequency
@@ -52,11 +72,11 @@ const calculateReminderTime = (taskDate, frequencyValue, frequencyUnit) => {
   } else if (frequencyUnit === 'Weeks') {
     reminderTime.setDate(reminderTime.getDate() - frequencyValue * 7);
   }
-
+  // console.log("Calculated reminder time:", reminderTime);
   return reminderTime;
 };
 
-// Schedule the email reminder using cron
+
 const scheduleEmailReminder = (taskTitle, reminderTime, UID, taskDescription, taskDate, LID, PID) => {
   if (reminderTime <= new Date()) {
     console.error(`Reminder time for task "${taskTitle}" is in the past. Skipping scheduling.`);
@@ -64,14 +84,12 @@ const scheduleEmailReminder = (taskTitle, reminderTime, UID, taskDescription, ta
   }
 
   const cronTime = `${reminderTime.getMinutes()} ${reminderTime.getHours()} ${reminderTime.getDate()} ${reminderTime.getMonth() + 1} *`;
-  cron.schedule(cronTime, async () => {
-    try {
 
+  const job = cron.schedule(cronTime, async () => {
+    try {
       const userEmail = await getUserEmail(UID);
-      
       const leadName = LID ? await getLeadName(LID) : 'Not Assigned';
       const productName = PID ? await getProductName(PID) : 'Not Assigned';
-
 
       if (userEmail) {
         sendEmailReminder(taskTitle, userEmail, taskDescription, taskDate, leadName, productName);
@@ -82,6 +100,8 @@ const scheduleEmailReminder = (taskTitle, reminderTime, UID, taskDescription, ta
       console.error('Error during email reminder:', error);
     }
   });
+
+  return job;  
 };
 
 // Send email reminder using nodemailer
@@ -104,12 +124,12 @@ const sendEmailReminder = async (taskTitle, userEmail, taskDescription, taskDate
     to: userEmail,
     subject: `Reminder for Task: ${taskTitle}`,
     html: `
-      <h2>Reminder for Task: ${taskTitle}</h2>
+      <h2>Task Reminder: ${taskTitle}</h2>
       <p><strong>Due Time:</strong> ${new Date(taskDate).toLocaleString()}</p>
       ${leadName && leadName !== 'Not Assigned' ? `<p><strong>Lead Name:</strong> ${leadName}</p>` : ''}
       ${productName && productName !== 'Not Assigned' ? `<p><strong>Product:</strong> ${productName}</p>` : ''}
       <p><strong>Description:</strong> ${taskDescription}</p>
-      <p>Please make sure to complete the task before the due time.</p>
+      <p>Please make sure to complete the task before its due time.</p>
       <p>Thank you!</p>
     `
   };

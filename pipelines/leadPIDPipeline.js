@@ -46,13 +46,35 @@ const leadPIDPipeline = (userType, uid, pid) => {
       $unwind: "$userDetails"
     },
     {
-      $match: pid && pid === 'New' ? { 
-        "createdOn": {
-          "$gte": new Date(new Date().setMonth(new Date().getMonth() - 2))
+      $match:
+        pid && pid === "New"
+          ? {
+              "createdOn": {
+                "$gte": new Date(new Date().setMonth(new Date().getMonth() - 2))
+              }
+            }
+          : pid && pid !== "All"
+          ? {
+              "productDetails.PID": pid
+            }
+          : {}
+    },
+    {
+      $addFields: {
+        sortPriority: {
+          $cond: {
+            if: { $eq: ["$statusDetails.sName", "inactive"] },
+            then: 1,
+            else: 0
+          }
         }
-          } : pid && pid !== 'All' ? { 
-          "productDetails.PID": pid 
-      } : {}
+      }
+    },
+    {
+      $sort: {
+        sortPriority: 1,
+        createdOn: -1 
+      }
     },
     {
       $project: {
@@ -69,7 +91,7 @@ const leadPIDPipeline = (userType, uid, pid) => {
           source: "$productDetails.source",
           SID: "$statusDetails.SID",
           sName: "$statusDetails.sName",
-          createdOn: 1,
+          createdOn: "$createdOn",
           assignedTo: "$userDetails.uName"
         }
       }
@@ -78,14 +100,13 @@ const leadPIDPipeline = (userType, uid, pid) => {
 
   if (userType === 2) {
     pipeline.unshift({
-      "$match": {
-        "UID": uid
+      $match: {
+        UID: uid
       }
     });
   }
-  
+
   return pipeline;
-}
+};
 
 module.exports = leadPIDPipeline;
-

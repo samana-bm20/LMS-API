@@ -1,53 +1,44 @@
 require("dotenv").config();
 const express = require("express");
-const http = require('http'); 
-const socketIO = require('socket.io');
+const http = require('http');
 const cors = require('cors');
 const path = require('path');
 const { connectToMongoDB } = require('./config/database');
 const apiRoutes = require("./routes/api");
+const socketHandler = require('./socket'); // Import the socket handler
+
 const PORT = process.env.PORT;
+const SECRET_KEY = process.env.SECRET_KEY;
 
 const app = express();
-const server = http.createServer(app); // Create HTTP server
-
 app.use(express.json());
-app.use(cors());
-app.options('*', cors());
-app.use('/public', express.static(path.join(__dirname, 'public')));
 
-// Initialize Socket.IO with the HTTP server
-const io = socketIO(server, {
-  cors: {
-    origin: '*', // You can restrict this to specific origins for security
-    methods: ['GET', 'POST']
-  }
-});
+app.options('*', cors());
+app.use(cors());
+app.use(cors({
+  origin: '*',
+  allowedHeaders: ['Content-Type', 'Authorization', 'Content-Disposition'],
+  exposedHeaders: ["Content-Disposition"],
+}));
+
+app.use('/public', express.static(path.join(__dirname, 'public')));
 
 connectToMongoDB();
 
-app.use('/', apiRoutes(io));
-
-// Socket.IO event handling
-io.on('connection', (socket) => {
-  // console.log('A user connected:', socket.id);
-
-  // Assuming the client sends UID upon connection to assign the user to a room
-  socket.on('joinRoom', (UID) => {
-    socket.join(UID); // Join a room with the user's UID
-    // console.log(`User with UID: ${UID} joined room: ${UID}`);
-  });
-
-  // Handle other events...
-  
-  socket.on('disconnect', () => {
-    // console.log('User disconnected:', socket.id);
-  });
+const server = http.createServer(app);
+const io = require('socket.io')(server, {
+  cors: {
+    origin: "http://localhost:5173",
+    methods: ["GET", "POST"]
+  }
 });
 
-// Export the io instance to use in other modules
-// module.exports = { io };
+// Initialize socket events
+socketHandler(io, SECRET_KEY);
 
+app.use('/', apiRoutes(io));
+
+// Start server
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}/`);
 });
