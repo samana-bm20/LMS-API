@@ -61,6 +61,7 @@ const tCollection = client.db().collection('Tasks');
 const ESRIProductCollection = client.db().collection("VendorESRIClientProduct");
 const MLSoftwareRecords = client.db().collection("MLSoftwaresRecords");
 const PaymentDetails = client.db().collection("Payment");
+const uploadfile = client.db().collection("uploads.files");
 
 
 const getNextSequence = async (name) => {
@@ -1034,10 +1035,37 @@ module.exports = (io) => {
   router.get('/getESRIProduct', async (req, res) => res.sendStatus(405));
   router.post("/getESRIProduct", verifyToken, async (req, res) => {
     try {
-      const data = await ESRIProductCollection.find({
-        SNO: { $ne: 0 },
-      }).toArray();
-      res.status(200).json(encryptData(data));
+      const data = await ESRIProductCollection.find({ SNO: { $ne: 0 } }).toArray();
+  
+      // Fetch all SNO values from data
+      const snoList = data.map((item) => String(item.SNO));
+  
+      // Fetch associated files from fileupload collection
+      const fileData = await uploadfile.aggregate([
+        { $match: { "metadata.F_ID.SNO": { $in: snoList } } },
+        {
+          $group: {
+            _id: "$metadata.F_ID.SNO",
+            hasPO: { $max: { $cond: [{ $eq: ["$metadata.F_ID.docType", "PODocument"] }, true, false] } },
+            hasIC: { $max: { $cond: [{ $eq: ["$metadata.F_ID.docType", "InstallationCertificate"] }, true, false] } },
+          },
+        },
+      ]).toArray();
+  
+      // Convert fileData into a lookup object for fast access
+      const fileLookup = fileData.reduce((acc, file) => {
+        acc[file._id] = { hasPO: file.hasPO, hasIC: file.hasIC };
+        return acc;
+      }, {});
+  
+      // Merge file existence info into ESRI products data
+      const updatedData = data.map((product) => ({
+        ...product,
+        hasPO: fileLookup[product.SNO]?.hasPO || false,
+        hasIC: fileLookup[product.SNO]?.hasIC || false,
+      }));
+  
+      res.status(200).json(encryptData(updatedData));
     } catch (err) {
       console.error(err);
       res.status(500).send("Server Error");
@@ -1063,6 +1091,14 @@ module.exports = (io) => {
     const SNO = req.body.SNO;
     formData.SNO = SNO;
     try {
+      const existingRecord = await ESRIProductCollection.findOne({
+        PONumber: formData.PONumber,
+      });
+  
+      if (existingRecord) {
+        return res.status(400).send("PO Number already exists.");
+      }
+
       await ESRIProductCollection.insertOne(formData);
       res.status(200).json({ msg: "Record insert successfully!" });
     } catch (err) {
@@ -1077,29 +1113,39 @@ module.exports = (io) => {
     const sno = req.body.SNO;
     const filter = { SNO: sno }
 
-    const update = {
-      $set: {
-        ClientName: data.ClientName,
-        ClientAddress: data.ClientAddress,
-        City: data.City,
-        State: data.State,
-        Pincode: parseInt(data.Pincode),
-        Contact: data.Contact,
-        Phone: data.Phone,
-        Email: data.Email,
-        PONumber: data.PONumber,
-        PODate: data.PODate,
-        POValue: data.POValue,
-        Product: data.Product,
-        ProductVersion: parseFloat(data.ProductVersion),
-        Description: data.Description,
-        NumberOfLicenses: parseInt(data.NumberOfLicenses),
-        LicenseDate: data.LicenseDate,
-        Tenure: data.Tenure,
-        RenewalDueDate: data.RenewalDueDate
-      },
-    };
     try {
+      const existingRecord = await ESRIProductCollection.findOne({
+        PONumber: data.PONumber,
+        SNO: { $ne: sno },
+      });
+      
+      if (existingRecord) {
+        return res.status(400).send("PO Number already exists." );
+      }
+      
+      const update = {
+        $set: {
+          ClientName: data.ClientName,
+          ClientAddress: data.ClientAddress,
+          City: data.City,
+          State: data.State,
+          Pincode: parseInt(data.Pincode),
+          Contact: data.Contact,
+          Phone: data.Phone,
+          Email: data.Email,
+          PONumber: data.PONumber,
+          PODate: data.PODate,
+          POValue: data.POValue,
+          Product: data.Product,
+          ProductVersion: parseFloat(data.ProductVersion),
+          Description: data.Description,
+          NumberOfLicenses: parseInt(data.NumberOfLicenses),
+          LicenseDate: data.LicenseDate,
+          Tenure: data.Tenure,
+          RenewalDueDate: data.RenewalDueDate
+        },
+      };
+
       const result = await ESRIProductCollection.updateOne(filter, update);
       res.status(200).json({ count: result.modifiedCount, msg: "Record insert successfully!" });
     } catch (err) {
@@ -1113,22 +1159,58 @@ module.exports = (io) => {
     if (!file) {
       return res.status(400).send("No file uploaded");
     }
-    if (!file.id) {
-      return res.status(500).send("Failed to get file ID from GridFS");
-    }
     res.status(200).json({
       message: "File uploaded to GridFS successfully",
-      fileId: file.id,
     });
   });
 
+  router.get('/view', async (req, res) => res.sendStatus(405));
+  router.post("/view", verifyToken, async (req, res) => {
+    const fid = req.body.fid;
+    const docType = req.body.docType;
+
+    try {
+        const cursor = bucket
+            .find({ 
+                "metadata.F_ID.SNO": `${fid}`,
+                "metadata.F_ID.docType": docType
+            })
+            .sort({ uploadDate: -1 })
+            .limit(1);
+
+        const files = await cursor.toArray();
+
+        if (files.length === 0) {
+            return res.status(404).send("File not found!");
+        }
+
+        const fileId = new ObjectId(`${files[0]._id}`);
+        const downloadStream = bucket.openDownloadStream(fileId);
+
+        // Set headers to display the file in browser
+        res.setHeader("Content-Type", files[0].contentType || "application/octet-stream");
+        res.setHeader("Content-Disposition", `inline; filename="${files[0].filename}"`);
+
+        // Pipe file stream directly to response
+        downloadStream.pipe(res);
+    } catch (error) {
+        console.error("Error fetching file:", error);
+        res.status(500).send("An error occurred while fetching the file.");
+    }
+});
+
+
   router.get('/download', async (req, res) => res.sendStatus(405));
   router.post("/download", verifyToken, async (req, res) => {
-    const fid = req.body.viewmode;
+    const fid = req.body.fid;
+    const docType = req.body.docType;
     const fs = require("fs");
     const path = require("path");
     const cursor = bucket
-      .find({ "metadata.F_ID.SNO": `${fid}` })
+      .find({ 
+        "metadata.F_ID.SNO": `${fid}`,
+        "metadata.F_ID.docType": docType,
+      })
       .sort({ uploadDate: -1 })
       .limit(1);
     const files = await cursor.toArray();
